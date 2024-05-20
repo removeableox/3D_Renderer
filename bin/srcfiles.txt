@@ -1,0 +1,219 @@
+#include "includes.h"
+
+float* getVerticesFromFile(const char* filename, int* size) {
+	FILE *fptr;
+	fptr = fopen(filename, "r");
+	if (fptr == NULL) {
+		printf("Error opening file!");
+		return NULL;
+	}
+
+	char myString[100];
+	float *vertices3d = NULL;
+	int index = 0;
+	int capacity = 0;
+
+	while (fgets(myString, 100, fptr)) {
+		char* splitted = strtok(myString, ": \t\n");
+		while (splitted != NULL) {
+			if (index >= capacity) {
+				capacity += 10;
+				float *temp = realloc(vertices3d, capacity * sizeof(float));
+				if (temp == NULL) {
+					free(vertices3d);
+					fprintf(stderr, "Memory allocation failed\n");
+					fclose(fptr);
+					return NULL;
+				}
+				vertices3d = temp;
+			}
+			float num = atof(splitted);
+			vertices3d[index] = num;
+			index++;
+			splitted = strtok(NULL, ": \t\n");
+		}
+	}
+
+	*size = index;	
+
+	fclose(fptr);
+	return vertices3d;
+}
+#include "includes.h"
+
+int main() {
+	fflush(stdout);
+	if (!glfwInit()) {
+		return -1;
+	}
+
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+	GLFWwindow* window = glfwCreateWindow(640, 480, "window", NULL, NULL);
+	if (!window) {
+		glfwTerminate();
+		return -1;
+	}
+
+	glfwMakeContextCurrent(window);
+	glewExperimental = GL_TRUE;
+
+	GLenum glewInitResult = glewInit();
+	if (glewInitResult != GLEW_OK) {
+		printf("ERROR::GLEW_INIT_FAILED: %s\n", glewGetErrorString(glewInitResult));
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+
+	unsigned int shaderProgram = createShaderProgram();
+	
+	int size;
+	float* vertices3d = getVerticesFromFile("./vertices.txt", &size);
+	float* vertices2d = NULL;
+	float* vertices;
+	
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+
+	while (!glfwWindowShouldClose(window)) {
+		printf("\nframe\n");
+		fflush(stdout);
+
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		vertices3d = threeDimXRotation(vertices3d, 1, size);
+		vertices = threeDimToTwoDim(vertices3d, vertices2d, size);
+		
+		glUseProgram(shaderProgram);
+		unsigned int VAO = getVertexArray(vertices, size);
+		glBindVertexArray(VAO);
+		glDrawArrays(GL_POINTS, 0, size/3);
+
+		glfwSwapBuffers(window);
+		glfwPollEvents();
+	}
+	free(vertices2d);	
+
+	glDeleteProgram(shaderProgram);
+	
+	glfwDestroyWindow(window);
+	glfwTerminate();
+
+	return 0;
+}
+#include "includes.h"
+
+const char* vertexShaderSource = "#version 120\n"
+"attribute vec2 aPos;\n"
+"void main()\n"
+"{\n"
+"   gl_Position = vec4(aPos, 0.0, 1.0);\n"
+"   gl_PointSize = 10.0;\n"
+"}\0";
+
+const char* fragmentShaderSource = "#version 120\n"
+"void main()\n"
+"{\n"
+"   gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+"}\0";
+
+unsigned int createShaderProgram() {
+	unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
+	glCompileShader(vertexShader);
+
+	unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+	glCompileShader(fragmentShader);
+
+	unsigned int shaderProgram = glCreateProgram();
+	glAttachShader(shaderProgram, vertexShader);
+	glAttachShader(shaderProgram, fragmentShader);
+	glLinkProgram(shaderProgram);
+
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragmentShader);
+	
+	return shaderProgram;
+}
+#include "includes.h"
+
+int scale = 2;
+
+float* threeDimToTwoDim(float* vertices3d, float* vertices2d, int size) {
+	float matrix[2][3] = {
+		{1,0,0},
+		{0,1,0},
+	};
+
+	size_t transformedSize = (size/3) * 2;
+	vertices2d = realloc(vertices2d, transformedSize*sizeof(float));
+
+	int index = 0;
+
+	for (int i = 0; i < size; i += 3) {
+		vertices2d[index] = (vertices3d[i] * matrix[0][0] + vertices3d[i+1] * matrix[0][1])/scale;
+		vertices2d[index+1] = (vertices3d[i] * matrix[1][0] + vertices3d[i+1] * matrix[1][1])/scale;
+		index += 2; 
+	}
+
+	free(vertices3d);
+
+	return vertices2d;
+}
+
+float* matrixMultiplication(float matrix[3][3], float* vertices3d, int size) {
+	for (int i = 0; i < size; i += 3) {
+		float temp[] = {vertices3d[i], vertices3d[i+1], vertices3d[i+2]};
+		vertices3d[i] = (temp[0] * matrix[0][0] + temp[1] * matrix[0][1] + temp[2] * matrix[0][2]);
+		vertices3d[i+1] = (temp[0] * matrix[1][0] + temp[1] * matrix[1][1] + temp[2] * matrix[1][2]);
+		vertices3d[i+2] = (temp[0] * matrix[2][0] + temp[1] * matrix[2][1] + temp[2] * matrix[2][2]);
+	}
+
+	return vertices3d;
+}
+
+float* threeDimXRotation(float* vertices3d, int angle, int size) {
+	float a = angle * M_PI / 180.0;
+	float matrix[3][3] = {
+		{1,0,0},
+		{0,cos(a),-sin(a)},
+		{0,sin(a),cos(a)}
+	};
+
+	return matrixMultiplication(matrix, vertices3d, size);
+}
+
+float* threeDimYRotation(float* vertices3d, int angle, int size) {
+	float a = angle * M_PI / 180.0;
+	float matrix[3][3] = {
+		{cos(a),0,sin(a)},
+		{0,1,0},
+		{-sin(a),0,cos(a)}
+	};
+
+	return matrixMultiplication(matrix, vertices3d, size);
+}
+
+float* threeDimZRotation(float* vertices3d, int angle, int size) {
+	float a = angle * M_PI / 180.0;
+	float matrix[3][3] = {
+		{cos(a),-sin(a),0},
+		{sin(a),cos(a),0},
+		{0,0,1}
+	};
+
+	return matrixMultiplication(matrix, vertices3d, size);
+}
+
+unsigned int getVertexArray(float* vertices, int size) {
+	unsigned int VAO, VBO;
+	glGenVertexArrays(1, &VAO);
+	glGenBuffers(1, &VBO);
+	glBindVertexArray(VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, ((size/3)*2)*sizeof(float), vertices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+	return VAO;
+}
